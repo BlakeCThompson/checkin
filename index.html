@@ -252,7 +252,9 @@
     <h2>Notification services</h2>
     <p class="hint">Only fill in what you use. Each therapist can use a different method.</p>
     <div class="field"><label>Telegram bot token <span style="font-weight:400">(only if any therapist uses Telegram)</span></label><input id="admTgToken" placeholder="123456:ABC-…"></div>
-    <div class="field"><label>Textbelt API key <span style="font-weight:400">(only if any therapist uses real SMS — paid, per-text)</span></label><input id="admTbKey" placeholder="textbelt key"></div>
+    <div class="field"><label>Textbelt API key <span style="font-weight:400">(only if any therapist uses real SMS — paid, per-text)</span></label><input id="admTbKey" placeholder="textbelt key" oninput="updateQuotaLink()">
+      <a class="topic-link" id="tbQuotaLink" target="_blank" style="display:none">Check remaining Textbelt credits</a>
+    </div>
     <div class="btn-row"><button class="btn" onclick="saveGeneral()">Save settings</button></div>
 
     <h2>Recent check-ins</h2>
@@ -588,14 +590,14 @@ async function sendNotification(t, msg) {
   if (t.method === 'sms') {
     if (!cfg.tbKey) throw new Error('No Textbelt key configured');
     if (!t.phone) throw new Error('No phone number configured');
-    const r = await fetchWithRetry('https://textbelt.com/text', {
+    // Textbelt's response has no CORS headers, so the browser can't read it —
+    // send fire-and-forget. No retry here: a retry would send a duplicate text.
+    await fetch('https://textbelt.com/text', {
       method: 'POST',
+      mode: 'no-cors',
       body: new URLSearchParams({ phone: t.phone, message: msg, key: cfg.tbKey })
     });
-    if (!r.ok) return false;
-    const j = await r.json();
-    if (!j.success && j.error) throw new Error(j.error);
-    return !!j.success;
+    return true;
   }
   throw new Error('Unknown notification method');
 }
@@ -642,6 +644,7 @@ function renderAdmin() {
   document.getElementById('admMsgStyle').value = cfg.msgStyle || 'anon';
   document.getElementById('admTgToken').value = cfg.tgToken || '';
   document.getElementById('admTbKey').value = cfg.tbKey || '';
+  updateQuotaLink();
 
   const list = document.getElementById('adminTList');
   list.innerHTML = '';
@@ -707,6 +710,13 @@ function moveTherapist(i, dir) {
   const a = cfg.therapists;
   [a[i], a[j]] = [a[j], a[i]];
   save(); renderAdmin();
+}
+
+function updateQuotaLink() {
+  const k = document.getElementById('admTbKey').value.trim();
+  const a = document.getElementById('tbQuotaLink');
+  if (k) { a.href = 'https://textbelt.com/quota/' + encodeURIComponent(k); a.style.display = 'block'; }
+  else { a.style.display = 'none'; }
 }
 
 function saveGeneral() {
@@ -873,7 +883,11 @@ async function testTherapist() {
     const ok = await sendNotification(t, 'Test from ' + (cfg.officeName || 'the check-in kiosk') +
       ' — if you can read this, notifications are working! (' +
       new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ')');
-    toast(ok ? 'Test sent! Check the phone.' : 'The service rejected the message — check the settings.');
+    if (t.method === 'sms') {
+      toast('Test request sent. Textbelt gives no in-browser confirmation — check the phone. If nothing arrives, verify your key and credits.', 6000);
+    } else {
+      toast(ok ? 'Test sent! Check the phone.' : 'The service rejected the message — check the settings.');
+    }
   } catch (e) {
     toast('Test failed: ' + e.message);
   }
