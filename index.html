@@ -29,6 +29,14 @@
     font-size: 34px; font-weight: 700; letter-spacing: -0.5px; padding: 12px 24px;
     display: inline-block; cursor: default;
   }
+  #logoWrap { display: none; margin: 0 auto 14px; }
+  #logoWrap img { max-width: min(560px, 82vw); max-height: 170px; height: auto; display: block; }
+  #logoWrap.logo-dark { background: #2f2a26; padding: 20px 30px; border-radius: 18px; }
+
+  /* logo preview (setup + admin) */
+  .logo-prev-wrap { display: none; margin-bottom: 10px; border-radius: 12px; }
+  .logo-prev-wrap img { max-width: min(340px, 68vw); max-height: 110px; height: auto; display: block; }
+  .logo-prev-wrap.logo-dark { background: #2f2a26; padding: 14px 20px; }
   .kiosk-sub { font-size: 20px; color: #7a736b; margin-bottom: 28px; text-align: center; }
 
   .name-row {
@@ -183,6 +191,22 @@
     <h1>Welcome — one-time setup</h1>
     <p class="hint">Set your practice name and an admin password. The admin password protects the therapist list and settings. <strong>Write it down</strong> — there is no reset other than wiping the app's data.</p>
     <div class="field"><label>Practice name (shown on the kiosk)</label><input id="setupOffice" placeholder="Riverbend Counseling"></div>
+    <div class="field">
+      <label>Logo (optional — shown at the top instead of the name)</label>
+      <span id="setupLogoPrevWrap" class="logo-prev-wrap"><img id="setupLogoPreview" alt=""></span>
+      <div class="btn-row">
+        <button type="button" class="btn secondary small" onclick="document.getElementById('setupLogoFile').click()">Choose logo</button>
+        <button type="button" class="btn secondary small" id="setupLogoClear" style="display:none" onclick="clearSetupLogo()">Remove</button>
+      </div>
+      <input type="file" id="setupLogoFile" accept="image/*" style="display:none" onchange="logoChosen(this,'setup')">
+      <div id="setupLogoBgRow" style="display:none; margin-top:12px">
+        <label>Logo looks best on</label>
+        <select id="setupLogoBg" onchange="renderLogoPreview('setupLogoPrevWrap','setupLogoPreview',pendingSetupLogo,this.value,'setupLogoClear')">
+          <option value="dark">Dark band — for white or light-colored logos</option>
+          <option value="light">Light / no band — for dark logos</option>
+        </select>
+      </div>
+    </div>
     <div class="field"><label>Admin password</label><input id="setupPass1" type="password" autocomplete="new-password"></div>
     <div class="field"><label>Confirm admin password</label><input id="setupPass2" type="password" autocomplete="new-password"></div>
     <div class="btn-row"><button class="btn" onclick="finishSetup()">Save &amp; continue</button></div>
@@ -191,7 +215,10 @@
 
 <!-- ============ KIOSK ============ -->
 <div class="screen" id="kioskScreen">
-  <div class="kiosk-header"><div id="officeTitle">Check In</div></div>
+  <div class="kiosk-header">
+    <span id="logoWrap"><img id="kioskLogo" alt=""></span>
+    <div id="officeTitle">Check In</div>
+  </div>
   <div class="kiosk-sub">Welcome! Let your therapist know you're here.</div>
 
   <div class="step-label">1 &nbsp;·&nbsp; Your name</div>
@@ -238,6 +265,23 @@
 
     <h2>General</h2>
     <div class="field"><label>Practice name</label><input id="admOffice"></div>
+    <div class="field">
+      <label>Logo (optional — shown at the top instead of the name)</label>
+      <span id="admLogoPrevWrap" class="logo-prev-wrap"><img id="admLogoPreview" alt=""></span>
+      <div class="btn-row">
+        <button type="button" class="btn secondary small" onclick="document.getElementById('admLogoFile').click()">Choose logo</button>
+        <button type="button" class="btn secondary small" id="admLogoClear" style="display:none" onclick="clearAdmLogo()">Remove</button>
+      </div>
+      <input type="file" id="admLogoFile" accept="image/*" style="display:none" onchange="logoChosen(this,'admin')">
+      <div id="admLogoBgRow" style="display:none; margin-top:12px">
+        <label>Logo looks best on</label>
+        <select id="admLogoBg" onchange="renderLogoPreview('admLogoPrevWrap','admLogoPreview',admLogoEffective(),this.value,'admLogoClear')">
+          <option value="dark">Dark band — for white or light-colored logos</option>
+          <option value="light">Light / no band — for dark logos</option>
+        </select>
+      </div>
+      <p class="hint" style="margin-top:8px">Changes to the logo save when you tap “Save settings” below.</p>
+    </div>
     <div class="field"><label>Confirmation screen resets after (seconds)</label><input id="admReset" type="number" min="3" max="60"></div>
     <div class="field">
       <label>What the notification says</label>
@@ -382,6 +426,8 @@ const NTFY_SERVER = 'https://ntfy.sh';
 let cfg = null;
 let editingId = null;   // therapist id being edited, null = new
 let pendingPhoto = undefined; // undefined = untouched, null = cleared, string = new data URL
+let pendingSetupLogo = null;  // logo data URL chosen during first-run setup
+let admPendingLogo = undefined; // admin: undefined = untouched, null = cleared, string = new data URL
 let titleTaps = [];
 let confirmTimer = null;
 
@@ -393,7 +439,7 @@ function save() { localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }
 
 function defaultCfg() {
   return { officeName: '', passHash: '', recoveryHash: '', therapists: [], tgToken: '', tbKey: '',
-           resetSecs: 8, msgStyle: 'anon', log: [] };
+           resetSecs: 8, msgStyle: 'anon', logo: null, logoBg: 'dark', log: [] };
 }
 
 /* ---------------- hashing (SHA-256 with fallback) ---------------- */
@@ -433,9 +479,12 @@ async function finishSetup() {
   cfg = defaultCfg();
   cfg.officeName = office;
   cfg.passHash = await hash(p1);
+  cfg.logo = pendingSetupLogo || null;
+  cfg.logoBg = document.getElementById('setupLogoBg').value || 'dark';
   const code = genRecoveryCode();
   cfg.recoveryHash = await hash(normalizeCode(code));
-  save();
+  try { save(); }
+  catch (e) { toast('That logo image is too large to store — try a smaller file.'); return; }
   renderKiosk();
   show('kioskScreen');
   document.getElementById('codeBox').textContent = code;
@@ -493,7 +542,18 @@ function initialsOf(name) {
 }
 
 function renderKiosk() {
-  document.getElementById('officeTitle').textContent = cfg.officeName || 'Check In';
+  const logoWrap = document.getElementById('logoWrap');
+  const titleEl = document.getElementById('officeTitle');
+  if (cfg.logo) {
+    document.getElementById('kioskLogo').src = cfg.logo;
+    logoWrap.style.display = 'inline-block';
+    logoWrap.classList.toggle('logo-dark', cfg.logoBg === 'dark');
+    titleEl.style.display = 'none';        // the logo carries the practice name
+  } else {
+    logoWrap.style.display = 'none';
+    titleEl.style.display = 'inline-block';
+    titleEl.textContent = cfg.officeName || 'Check In';
+  }
   document.title = (cfg.officeName ? cfg.officeName + ' — ' : '') + 'Check-In';
   const grid = document.getElementById('therapistGrid');
   grid.innerHTML = '';
@@ -611,7 +671,7 @@ async function fetchWithRetry(url, opts) {
 }
 
 /* ---------------- hidden admin access: 5 taps on title ---------------- */
-document.getElementById('officeTitle').addEventListener('click', () => {
+document.querySelector('.kiosk-header').addEventListener('click', () => {
   const now = Date.now();
   titleTaps = titleTaps.filter(t => now - t < 2500);
   titleTaps.push(now);
@@ -645,6 +705,10 @@ function renderAdmin() {
   document.getElementById('admTgToken').value = cfg.tgToken || '';
   document.getElementById('admTbKey').value = cfg.tbKey || '';
   updateQuotaLink();
+  admPendingLogo = undefined;
+  document.getElementById('admLogoBg').value = cfg.logoBg || 'dark';
+  renderLogoPreview('admLogoPrevWrap', 'admLogoPreview', cfg.logo || null, cfg.logoBg || 'dark', 'admLogoClear');
+  document.getElementById('admLogoBgRow').style.display = cfg.logo ? 'block' : 'none';
 
   const list = document.getElementById('adminTList');
   list.innerHTML = '';
@@ -726,7 +790,12 @@ function saveGeneral() {
   cfg.msgStyle = document.getElementById('admMsgStyle').value;
   cfg.tgToken = document.getElementById('admTgToken').value.trim();
   cfg.tbKey = document.getElementById('admTbKey').value.trim();
-  save();
+  cfg.logoBg = document.getElementById('admLogoBg').value;
+  const prevLogo = cfg.logo;
+  if (admPendingLogo !== undefined) cfg.logo = admPendingLogo;
+  try { save(); }
+  catch (e) { cfg.logo = prevLogo; toast('That logo image is too large to store — try a smaller file.'); return; }
+  admPendingLogo = undefined;
   toast('Settings saved');
 }
 
@@ -837,6 +906,66 @@ function clearPhoto() {
   pendingPhoto = null;
   document.getElementById('tPhotoPreview').style.display = 'none';
   document.getElementById('tPhotoClear').style.display = 'none';
+}
+
+/* ---------------- logo ---------------- */
+// Resize preserving aspect ratio; keep PNG so transparency survives.
+function logoChosen(input, context) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    const maxW = 800, maxH = 300;
+    const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+    const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(url);
+    const dataUrl = canvas.toDataURL('image/png');
+    if (context === 'setup') {
+      pendingSetupLogo = dataUrl;
+      document.getElementById('setupLogoBgRow').style.display = 'block';
+      renderLogoPreview('setupLogoPrevWrap', 'setupLogoPreview', dataUrl, document.getElementById('setupLogoBg').value, 'setupLogoClear');
+    } else {
+      admPendingLogo = dataUrl;
+      document.getElementById('admLogoBgRow').style.display = 'block';
+      renderLogoPreview('admLogoPrevWrap', 'admLogoPreview', dataUrl, document.getElementById('admLogoBg').value, 'admLogoClear');
+    }
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast('Could not read that image.'); };
+  img.src = url;
+}
+
+function renderLogoPreview(wrapId, imgId, dataUrl, bg, clearBtnId) {
+  const wrap = document.getElementById(wrapId);
+  if (dataUrl) {
+    document.getElementById(imgId).src = dataUrl;
+    wrap.style.display = 'inline-block';
+    wrap.classList.toggle('logo-dark', bg === 'dark');
+    if (clearBtnId) document.getElementById(clearBtnId).style.display = 'inline-block';
+  } else {
+    wrap.style.display = 'none';
+    if (clearBtnId) document.getElementById(clearBtnId).style.display = 'none';
+  }
+}
+
+function clearSetupLogo() {
+  pendingSetupLogo = null;
+  document.getElementById('setupLogoBgRow').style.display = 'none';
+  renderLogoPreview('setupLogoPrevWrap', 'setupLogoPreview', null, 'dark', 'setupLogoClear');
+}
+
+function admLogoEffective() {
+  return admPendingLogo !== undefined ? admPendingLogo : (cfg.logo || null);
+}
+
+function clearAdmLogo() {
+  admPendingLogo = null;
+  document.getElementById('admLogoBgRow').style.display = 'none';
+  renderLogoPreview('admLogoPrevWrap', 'admLogoPreview', null, 'dark', 'admLogoClear');
 }
 
 function collectTherapistForm() {

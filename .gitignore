@@ -3,3 +3,6 @@ rec.code.txt
 *.code.txt
 checkin-backup-*.json
 .DS_Store
+
+# Logos / brand assets kept local only, never in the public repo
+images/
