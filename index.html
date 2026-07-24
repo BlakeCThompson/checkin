@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Waiting Room Check-In</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overscroll-behavior: none; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f6f4f0;
+    color: #2f2a26;
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  input, textarea { -webkit-user-select: text; user-select: text; }
+
+  .screen { display: none; min-height: 100vh; flex-direction: column; }
+  .screen.active { display: flex; }
+
+  /* ---------- Kiosk ---------- */
+  #kioskScreen { align-items: center; padding: 32px 24px 48px; }
+  .kiosk-header { text-align: center; margin-bottom: 8px; }
+  #officeTitle {
+    font-size: 34px; font-weight: 700; letter-spacing: -0.5px; padding: 12px 24px;
+    display: inline-block; cursor: default;
+  }
+  .kiosk-sub { font-size: 20px; color: #7a736b; margin-bottom: 28px; text-align: center; }
+
+  .name-row {
+    display: flex; gap: 14px; width: 100%; max-width: 640px; margin-bottom: 36px;
+    justify-content: center;
+  }
+  .name-row input {
+    font-size: 26px; padding: 18px 20px; border: 2px solid #ddd6cc; border-radius: 16px;
+    background: #fff; outline: none; text-align: center;
+  }
+  .name-row input:focus { border-color: #6b8f71; }
+  #firstName { flex: 1; max-width: 420px; }
+  #lastInitial { width: 130px; text-transform: uppercase; }
+  .name-row.error input { border-color: #c0564b; animation: shake 0.35s; }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
+
+  .step-label {
+    font-size: 17px; font-weight: 600; color: #6b8f71; text-transform: uppercase;
+    letter-spacing: 1.5px; margin-bottom: 14px;
+  }
+
+  #therapistGrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 20px; width: 100%; max-width: 960px;
+  }
+  .t-card {
+    background: #fff; border-radius: 20px; padding: 24px 16px 20px; text-align: center;
+    box-shadow: 0 2px 10px rgba(60,50,40,0.07); border: 2px solid transparent;
+    cursor: pointer; transition: transform 0.1s;
+  }
+  .t-card:active { transform: scale(0.96); border-color: #6b8f71; }
+  .t-photo, .t-initials {
+    width: 104px; height: 104px; border-radius: 50%; margin: 0 auto 14px;
+    object-fit: cover; display: block;
+  }
+  .t-initials {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 38px; font-weight: 600; color: #fff; background: #a8b8a0;
+  }
+  .t-name { font-size: 20px; font-weight: 600; }
+  .grid-disabled { pointer-events: none; opacity: 0.5; }
+
+  .empty-note { color: #9a9186; font-size: 18px; text-align: center; margin-top: 40px; }
+
+  /* ---------- Overlays ---------- */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(246,244,240,0.97); z-index: 50;
+    display: none; align-items: center; justify-content: center; flex-direction: column;
+    text-align: center; padding: 32px;
+  }
+  .overlay.active { display: flex; }
+  .big-check {
+    width: 110px; height: 110px; border-radius: 50%; background: #6b8f71; color: #fff;
+    font-size: 58px; display: flex; align-items: center; justify-content: center;
+    margin-bottom: 28px;
+  }
+  .big-x { background: #c0564b; }
+  .confirm-title { font-size: 34px; font-weight: 700; margin-bottom: 12px; }
+  .confirm-sub { font-size: 22px; color: #7a736b; max-width: 560px; line-height: 1.45; }
+  .spinner {
+    width: 64px; height: 64px; border: 6px solid #ddd6cc; border-top-color: #6b8f71;
+    border-radius: 50%; animation: spin 0.9s linear infinite; margin-bottom: 24px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------- Setup & Admin shared ---------- */
+  .panel {
+    width: 100%; max-width: 720px; margin: 0 auto; padding: 32px 24px 80px;
+  }
+  .panel h1 { font-size: 28px; margin-bottom: 6px; }
+  .panel h2 { font-size: 20px; margin: 30px 0 12px; }
+  .panel .hint { color: #7a736b; font-size: 15px; line-height: 1.5; margin-bottom: 18px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #55504a; }
+  .field input, .field select {
+    width: 100%; font-size: 17px; padding: 12px 14px; border: 1.5px solid #ddd6cc;
+    border-radius: 10px; background: #fff; outline: none;
+  }
+  .field input:focus, .field select:focus { border-color: #6b8f71; }
+  .btn {
+    display: inline-block; font-size: 17px; font-weight: 600; padding: 13px 22px;
+    border-radius: 12px; border: none; cursor: pointer; background: #6b8f71; color: #fff;
+  }
+  .btn:active { opacity: 0.8; }
+  .btn.secondary { background: #e8e3da; color: #2f2a26; }
+  .btn.danger { background: #c0564b; }
+  .btn.small { font-size: 14px; padding: 8px 14px; border-radius: 9px; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+
+  .admin-topbar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 18px 24px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .admin-topbar h1 { font-size: 21px; }
+
+  .t-row {
+    display: flex; align-items: center; gap: 14px; background: #fff; border-radius: 14px;
+    padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 1px 5px rgba(60,50,40,0.06);
+  }
+  .t-row img, .t-row .t-initials { width: 52px; height: 52px; font-size: 20px; margin: 0; flex-shrink: 0; border-radius: 50%; object-fit: cover; }
+  .t-row-info { flex: 1; min-width: 0; }
+  .t-row-edit { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; cursor: pointer; border-radius: 10px; }
+  .t-row-edit:active { background: #efeae2; }
+  .t-row-name { font-weight: 600; font-size: 17px; }
+  .t-row-meta { font-size: 13px; color: #7a736b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-row-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+  /* ---------- Modal ---------- */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(40,35,30,0.45); z-index: 100;
+    display: none; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 40px 16px;
+  }
+  .modal-bg.active { display: flex; }
+  .modal {
+    background: #f6f4f0; border-radius: 18px; padding: 26px 24px; width: 100%; max-width: 520px;
+  }
+  .modal h2 { font-size: 21px; margin-bottom: 16px; }
+  .method-fields { display: none; }
+  .method-fields.active { display: block; }
+  .topic-link { font-size: 14px; word-break: break-all; color: #4a6e94; margin-top: 6px; display: block; }
+  .chat-chip {
+    display: inline-block; background: #e8e3da; border-radius: 8px; padding: 7px 12px;
+    margin: 4px 6px 0 0; font-size: 14px; cursor: pointer;
+  }
+  .photo-preview { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; display: block; margin-bottom: 8px; }
+
+  table.log { width: 100%; border-collapse: collapse; font-size: 14px; background: #fff; border-radius: 12px; overflow: hidden; }
+  table.log th, table.log td { text-align: left; padding: 9px 12px; border-bottom: 1px solid #eee8df; }
+  table.log th { background: #efeae2; font-weight: 600; }
+  .ok-dot { color: #6b8f71; } .fail-dot { color: #c0564b; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #2f2a26; color: #fff; padding: 12px 22px; border-radius: 12px;
+    font-size: 15px; z-index: 200; display: none; max-width: 90vw; text-align: center;
+  }
+  .toast.active { display: block; }
+
+  .code-box {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 34px; font-weight: 700;
+    letter-spacing: 3px; text-align: center; background: #fff; border: 2px dashed #6b8f71;
+    border-radius: 14px; padding: 20px; margin: 14px 0 18px; user-select: text; -webkit-user-select: text;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ FIRST-RUN SETUP ============ -->
+<div class="screen" id="setupScreen">
+  <div class="panel">
+    <h1>Welcome — one-time setup</h1>
+    <p class="hint">Set your practice name and an admin password. The admin password protects the therapist list and settings. <strong>Write it down</strong> — there is no reset other than wiping the app's data.</p>
+    <div class="field"><label>Practice name (shown on the kiosk)</label><input id="setupOffice" placeholder="Riverbend Counseling"></div>
+    <div class="field"><label>Admin password</label><input id="setupPass1" type="password" autocomplete="new-password"></div>
+    <div class="field"><label>Confirm admin password</label><input id="setupPass2" type="password" autocomplete="new-password"></div>
+    <div class="btn-row"><button class="btn" onclick="finishSetup()">Save &amp; continue</button></div>
+  </div>
+</div>
+
+<!-- ============ KIOSK ============ -->
+<div class="screen" id="kioskScreen">
+  <div class="kiosk-header"><div id="officeTitle">Check In</div></div>
+  <div class="kiosk-sub">Welcome! Let your therapist know you're here.</div>
+
+  <div class="step-label">1 &nbsp;·&nbsp; Your name</div>
+  <div class="name-row" id="nameRow">
+    <input id="firstName" placeholder="First name" autocomplete="off" autocorrect="off" maxlength="30">
+    <input id="lastInitial" placeholder="Initial" autocomplete="off" autocorrect="off" maxlength="1">
+  </div>
+
+  <div class="step-label">2 &nbsp;·&nbsp; Tap your therapist</div>
+  <div id="therapistGrid"></div>
+  <div class="empty-note" id="emptyNote" style="display:none">No therapists set up yet.<br>Tap the practice name 5 times to open admin settings.</div>
+</div>
+
+<!-- ============ OVERLAYS ============ -->
+<div class="overlay" id="sendingOverlay">
+  <div class="spinner"></div>
+  <div class="confirm-title">Notifying…</div>
+</div>
+
+<div class="overlay" id="confirmOverlay">
+  <div class="big-check">✓</div>
+  <div class="confirm-title" id="confirmTitle">You're checked in!</div>
+  <div class="confirm-sub" id="confirmSub"></div>
+</div>
+
+<div class="overlay" id="failOverlay">
+  <div class="big-check big-x">!</div>
+  <div class="confirm-title">Sorry — that didn't go through</div>
+  <div class="confirm-sub">Please let the front desk know you're here, or knock gently on your therapist's door at your appointment time.</div>
+  <div class="btn-row" style="margin-top:26px"><button class="btn" onclick="resetKiosk()">OK</button></div>
+</div>
+
+<!-- ============ ADMIN ============ -->
+<div class="screen" id="adminScreen">
+  <div class="admin-topbar">
+    <h1>Admin settings</h1>
+    <button class="btn secondary" onclick="exitAdmin()">Done — back to kiosk</button>
+  </div>
+  <div class="panel">
+
+    <h2>Therapists</h2>
+    <div id="adminTList"></div>
+    <div class="btn-row"><button class="btn" onclick="openTherapistModal(null)">+ Add therapist</button></div>
+
+    <h2>General</h2>
+    <div class="field"><label>Practice name</label><input id="admOffice"></div>
+    <div class="field"><label>Confirmation screen resets after (seconds)</label><input id="admReset" type="number" min="3" max="60"></div>
+    <div class="field">
+      <label>What the notification says</label>
+      <select id="admMsgStyle">
+        <option value="anon">No name — “A client has checked in for you” (most private, recommended)</option>
+        <option value="first">First name only — “Blake is in the waiting room”</option>
+        <option value="name">First name + last initial — “Blake T. is in the waiting room”</option>
+      </select>
+    </div>
+    <p class="hint">The no-name option keeps client information off the notification services entirely, which is the safest choice for a healthcare setting. Clients still enter their name either way — it appears in the check-in log on this iPad only.</p>
+
+    <h2>Notification services</h2>
+    <p class="hint">Only fill in what you use. Each therapist can use a different method.</p>
+    <div class="field"><label>Telegram bot token <span style="font-weight:400">(only if any therapist uses Telegram)</span></label><input id="admTgToken" placeholder="123456:ABC-…"></div>
+    <div class="field"><label>Textbelt API key <span style="font-weight:400">(only if any therapist uses real SMS — paid, per-text)</span></label><input id="admTbKey" placeholder="textbelt key"></div>
+    <div class="btn-row"><button class="btn" onclick="saveGeneral()">Save settings</button></div>
+
+    <h2>Recent check-ins</h2>
+    <div id="logWrap" style="overflow-x:auto"></div>
+
+    <h2>Backup</h2>
+    <p class="hint">Export saves everything (therapists, photos, settings) to a file. Keep a copy — if the iPad is wiped or Safari data is cleared, import it to restore.</p>
+    <div class="btn-row">
+      <button class="btn secondary" onclick="exportConfig()">Export backup</button>
+      <button class="btn secondary" onclick="document.getElementById('importFile').click()">Import backup</button>
+      <input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importConfig(this)">
+    </div>
+
+    <h2>Change admin password</h2>
+    <div class="field"><label>New password</label><input id="admNewPass" type="password" autocomplete="new-password"></div>
+    <div class="btn-row">
+      <button class="btn secondary" onclick="changePassword()">Change password</button>
+      <button class="btn secondary" onclick="newRecoveryCode()">Generate new recovery code</button>
+    </div>
+    <p class="hint" style="margin-top:8px">The recovery code lets you reset a forgotten admin password from the login screen. If you've lost the code (or never had one), generate a new one here and write it down.</p>
+
+    <h2>Danger zone</h2>
+    <div class="btn-row"><button class="btn danger" onclick="wipeAll()">Erase all data &amp; start over</button></div>
+  </div>
+</div>
+
+<!-- ============ ADMIN LOGIN MODAL ============ -->
+<div class="modal-bg" id="loginModal">
+  <div class="modal">
+    <h2>Admin password</h2>
+    <div class="field"><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
+    <div class="btn-row">
+      <button class="btn" onclick="tryLogin()">Unlock</button>
+      <button class="btn secondary" onclick="closeModal('loginModal')">Cancel</button>
+      <button class="btn secondary" onclick="closeModal('loginModal'); openResetModal()">Forgot password?</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ THERAPIST EDIT MODAL ============ -->
+<div class="modal-bg" id="tModal">
+  <div class="modal">
+    <h2 id="tModalTitle">Add therapist</h2>
+    <div class="field"><label>Display name</label><input id="tName" placeholder="Dr. Sarah Miller"></div>
+
+    <div class="field">
+      <label>Photo (optional)</label>
+      <img id="tPhotoPreview" class="photo-preview" style="display:none">
+      <div class="btn-row">
+        <button class="btn secondary small" onclick="document.getElementById('tPhotoFile').click()">Choose photo</button>
+        <button class="btn secondary small" id="tPhotoClear" style="display:none" onclick="clearPhoto()">Remove photo</button>
+      </div>
+      <input type="file" id="tPhotoFile" accept="image/*" style="display:none" onchange="photoChosen(this)">
+    </div>
+
+    <div class="field">
+      <label>How should this therapist be notified?</label>
+      <select id="tMethod" onchange="methodChanged()">
+        <option value="ntfy">Push notification — ntfy app (free)</option>
+        <option value="telegram">Telegram message (free)</option>
+        <option value="sms">Real SMS text — Textbelt (paid per text)</option>
+      </select>
+    </div>
+
+    <div class="method-fields" id="mf-ntfy">
+      <div class="field">
+        <label>ntfy topic (their private channel name)</label>
+        <input id="tNtfyTopic" placeholder="tap Generate">
+        <a class="topic-link" id="tNtfyLink" target="_blank"></a>
+      </div>
+      <div class="btn-row"><button class="btn secondary small" onclick="genTopic()">Generate topic</button></div>
+      <p class="hint" style="margin-top:10px">On the therapist's phone: install the free <strong>ntfy</strong> app (App Store / Play Store), tap +, and subscribe to this exact topic. Their phone will then buzz on every check-in.</p>
+    </div>
+
+    <div class="method-fields" id="mf-telegram">
+      <div class="field"><label>Telegram chat ID</label><input id="tTgChat" placeholder="e.g. 123456789"></div>
+      <div class="btn-row"><button class="btn secondary small" onclick="detectChats()">Detect recent chats</button></div>
+      <div id="chatChips"></div>
+      <p class="hint" style="margin-top:10px">The therapist opens Telegram, searches for your bot, and sends it any message. Then tap “Detect recent chats” above and pick their name. (Requires the bot token in General settings.)</p>
+    </div>
+
+    <div class="method-fields" id="mf-sms">
+      <div class="field"><label>Mobile number (with country code)</label><input id="tPhone" type="tel" placeholder="+15551234567"></div>
+      <p class="hint">Uses Textbelt — real texts, a few cents each. Requires the Textbelt key in General settings.</p>
+    </div>
+
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn" onclick="saveTherapist()">Save</button>
+      <button class="btn secondary" onclick="closeModal('tModal')">Cancel</button>
+      <button class="btn secondary" id="tTestBtn" onclick="testTherapist()">Send test</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ RECOVERY CODE DISPLAY MODAL ============ -->
+<div class="modal-bg" id="codeModal">
+  <div class="modal">
+    <h2>Your recovery code</h2>
+    <p class="hint">If you ever forget the admin password, this code lets you set a new one right on the iPad. <strong>Write it down and keep it with your records</strong> — it is shown only this once and replaces any earlier code.</p>
+    <div class="code-box" id="codeBox"></div>
+    <div class="btn-row"><button class="btn" onclick="codeModalDone()">I've written it down</button></div>
+  </div>
+</div>
+
+<!-- ============ PASSWORD RESET MODAL ============ -->
+<div class="modal-bg" id="resetModal">
+  <div class="modal">
+    <h2>Reset admin password</h2>
+    <p class="hint">Enter the recovery code you were shown during setup.</p>
+    <div class="field"><label>Recovery code</label><input id="resetCode" placeholder="XXXX-XXXX" autocomplete="off" autocorrect="off" autocapitalize="characters"></div>
+    <div class="field"><label>New admin password</label><input id="resetPass" type="password" autocomplete="new-password"></div>
+    <div class="btn-row">
+      <button class="btn" onclick="doReset()">Set new password</button>
+      <button class="btn secondary" onclick="closeModal('resetModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const LS_KEY = 'wrCheckinCfg';
+const NTFY_SERVER = 'https://ntfy.sh';
+let cfg = null;
+let editingId = null;   // therapist id being edited, null = new
+let pendingPhoto = undefined; // undefined = untouched, null = cleared, string = new data URL
+let titleTaps = [];
+let confirmTimer = null;
+
+/* ---------------- storage ---------------- */
+function load() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) { return null; }
+}
+function save() { localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }
+
+function defaultCfg() {
+  return { officeName: '', passHash: '', recoveryHash: '', therapists: [], tgToken: '', tbKey: '',
+           resetSecs: 8, msgStyle: 'anon', log: [] };
+}
+
+/* ---------------- hashing (SHA-256 with fallback) ---------------- */
+async function hash(str) {
+  const data = new TextEncoder().encode('wr-salt::' + str);
+  if (crypto && crypto.subtle) {
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  let h = 5381; // djb2 fallback for non-secure contexts
+  for (const b of data) h = ((h * 33) ^ b) >>> 0;
+  return 'djb2-' + h.toString(16);
+}
+
+/* ---------------- screens ---------------- */
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+function openModal(id) { document.getElementById(id).classList.add('active'); }
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+function toast(msg, ms = 2600) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('active');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('active'), ms);
+}
+
+/* ---------------- first-run setup ---------------- */
+async function finishSetup() {
+  const office = document.getElementById('setupOffice').value.trim();
+  const p1 = document.getElementById('setupPass1').value;
+  const p2 = document.getElementById('setupPass2').value;
+  if (!office) return toast('Please enter your practice name.');
+  if (p1.length < 4) return toast('Password must be at least 4 characters.');
+  if (p1 !== p2) return toast('Passwords do not match.');
+  cfg = defaultCfg();
+  cfg.officeName = office;
+  cfg.passHash = await hash(p1);
+  const code = genRecoveryCode();
+  cfg.recoveryHash = await hash(normalizeCode(code));
+  save();
+  renderKiosk();
+  show('kioskScreen');
+  document.getElementById('codeBox').textContent = code;
+  openModal('codeModal');
+}
+
+/* ---------------- recovery code ---------------- */
+function genRecoveryCode() {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  let s = '';
+  bytes.forEach(b => { s += chars[b % chars.length]; });
+  return s.slice(0, 4) + '-' + s.slice(4);
+}
+function normalizeCode(s) { return s.replace(/[^a-z0-9]/gi, '').toUpperCase(); }
+
+function codeModalDone() {
+  closeModal('codeModal');
+  toast('Tip: tap the practice name 5 times to open admin settings.', 4000);
+}
+
+async function newRecoveryCode() {
+  const code = genRecoveryCode();
+  cfg.recoveryHash = await hash(normalizeCode(code));
+  save();
+  document.getElementById('codeBox').textContent = code;
+  openModal('codeModal');
+}
+
+function openResetModal() {
+  document.getElementById('resetCode').value = '';
+  document.getElementById('resetPass').value = '';
+  openModal('resetModal');
+  setTimeout(() => document.getElementById('resetCode').focus(), 100);
+}
+
+async function doReset() {
+  if (!cfg.recoveryHash) return toast('No recovery code was ever set up on this iPad.');
+  const code = normalizeCode(document.getElementById('resetCode').value);
+  const p = document.getElementById('resetPass').value;
+  if (await hash(code) !== cfg.recoveryHash) return toast('That recovery code is not correct.');
+  if (p.length < 4) return toast('Password must be at least 4 characters.');
+  cfg.passHash = await hash(p);
+  save();
+  closeModal('resetModal');
+  renderAdmin();
+  show('adminScreen');
+  toast('Password updated — you are in admin settings.');
+}
+
+/* ---------------- kiosk ---------------- */
+function initialsOf(name) {
+  const words = name.split(/\s+/).filter(w => w && !/^dr\.?$/i.test(w));
+  return (words.length ? words : [name]).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+}
+
+function renderKiosk() {
+  document.getElementById('officeTitle').textContent = cfg.officeName || 'Check In';
+  document.title = (cfg.officeName ? cfg.officeName + ' — ' : '') + 'Check-In';
+  const grid = document.getElementById('therapistGrid');
+  grid.innerHTML = '';
+  document.getElementById('emptyNote').style.display = cfg.therapists.length ? 'none' : 'block';
+  cfg.therapists.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 't-card';
+    const av = t.photo
+      ? '<img class="t-photo" src="' + t.photo + '" alt="">'
+      : '<div class="t-initials">' + initialsOf(t.name) + '</div>';
+    card.innerHTML = av + '<div class="t-name"></div>';
+    card.querySelector('.t-name').textContent = t.name;
+    card.onclick = () => checkIn(t);
+    grid.appendChild(card);
+  });
+}
+
+async function checkIn(t) {
+  const first = document.getElementById('firstName').value.trim();
+  const init = document.getElementById('lastInitial').value.trim().toUpperCase();
+  if (!first) {
+    const row = document.getElementById('nameRow');
+    row.classList.add('error');
+    setTimeout(() => row.classList.remove('error'), 500);
+    document.getElementById('firstName').focus();
+    return;
+  }
+  const patient = first + (init ? ' ' + init + '.' : '');
+  const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const officeTag = cfg.officeName ? ' — ' + cfg.officeName : '';
+  let msg;
+  if (cfg.msgStyle === 'name') msg = patient + ' is in the waiting room (' + time + ')' + officeTag;
+  else if (cfg.msgStyle === 'first') msg = first + ' is in the waiting room (' + time + ')' + officeTag;
+  else msg = 'A client has checked in for you (' + time + ')' + officeTag;
+
+  document.getElementById('therapistGrid').classList.add('grid-disabled');
+  document.getElementById('sendingOverlay').classList.add('active');
+
+  let ok = false, err = '';
+  try { ok = await sendNotification(t, msg); }
+  catch (e) { err = e.message || String(e); }
+
+  document.getElementById('sendingOverlay').classList.remove('active');
+  document.getElementById('therapistGrid').classList.remove('grid-disabled');
+
+  cfg.log.unshift({ ts: Date.now(), patient: patient, therapist: t.name, ok: ok });
+  cfg.log = cfg.log.slice(0, 30);
+  save();
+
+  if (ok) {
+    document.getElementById('confirmTitle').textContent = 'Thanks, ' + first + '!';
+    document.getElementById('confirmSub').textContent =
+      t.name + ' knows you’re here. Please have a seat and they’ll be with you shortly.';
+    document.getElementById('confirmOverlay').classList.add('active');
+    clearTimeout(confirmTimer);
+    confirmTimer = setTimeout(resetKiosk, (cfg.resetSecs || 8) * 1000);
+  } else {
+    console.warn('Notification failed:', err);
+    document.getElementById('failOverlay').classList.add('active');
+  }
+}
+
+function resetKiosk() {
+  clearTimeout(confirmTimer);
+  document.getElementById('confirmOverlay').classList.remove('active');
+  document.getElementById('failOverlay').classList.remove('active');
+  document.getElementById('firstName').value = '';
+  document.getElementById('lastInitial').value = '';
+}
+
+/* ---------------- notification sending ---------------- */
+async function sendNotification(t, msg) {
+  if (t.method === 'ntfy') {
+    if (!t.ntfyTopic) throw new Error('No ntfy topic configured');
+    const r = await fetchWithRetry(NTFY_SERVER + '/' + encodeURIComponent(t.ntfyTopic), {
+      method: 'POST',
+      body: msg,
+      headers: { 'Title': 'Waiting room check-in', 'Priority': 'high', 'Tags': 'bell' }
+    });
+    return r.ok;
+  }
+  if (t.method === 'telegram') {
+    if (!cfg.tgToken) throw new Error('No Telegram bot token configured');
+    if (!t.tgChat) throw new Error('No Telegram chat ID configured');
+    const r = await fetchWithRetry('https://api.telegram.org/bot' + cfg.tgToken + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: t.tgChat, text: '🔔 ' + msg })
+    });
+    if (!r.ok) return false;
+    const j = await r.json();
+    return !!j.ok;
+  }
+  if (t.method === 'sms') {
+    if (!cfg.tbKey) throw new Error('No Textbelt key configured');
+    if (!t.phone) throw new Error('No phone number configured');
+    const r = await fetchWithRetry('https://textbelt.com/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: t.phone, message: msg, key: cfg.tbKey })
+    });
+    if (!r.ok) return false;
+    const j = await r.json();
+    if (!j.success && j.error) throw new Error(j.error);
+    return !!j.success;
+  }
+  throw new Error('Unknown notification method');
+}
+
+async function fetchWithRetry(url, opts) {
+  try { return await fetch(url, opts); }
+  catch (e) {
+    await new Promise(res => setTimeout(res, 1200));
+    return await fetch(url, opts);
+  }
+}
+
+/* ---------------- hidden admin access: 5 taps on title ---------------- */
+document.getElementById('officeTitle').addEventListener('click', () => {
+  const now = Date.now();
+  titleTaps = titleTaps.filter(t => now - t < 2500);
+  titleTaps.push(now);
+  if (titleTaps.length >= 5) {
+    titleTaps = [];
+    document.getElementById('loginPass').value = '';
+    openModal('loginModal');
+    setTimeout(() => document.getElementById('loginPass').focus(), 100);
+  }
+});
+document.getElementById('loginPass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') tryLogin();
+});
+
+async function tryLogin() {
+  const p = document.getElementById('loginPass').value;
+  if (await hash(p) === cfg.passHash) {
+    closeModal('loginModal');
+    renderAdmin();
+    show('adminScreen');
+  } else {
+    toast('Wrong password');
+  }
+}
+
+/* ---------------- admin ---------------- */
+function renderAdmin() {
+  document.getElementById('admOffice').value = cfg.officeName;
+  document.getElementById('admReset').value = cfg.resetSecs || 8;
+  document.getElementById('admMsgStyle').value = cfg.msgStyle || 'anon';
+  document.getElementById('admTgToken').value = cfg.tgToken || '';
+  document.getElementById('admTbKey').value = cfg.tbKey || '';
+
+  const list = document.getElementById('adminTList');
+  list.innerHTML = '';
+  if (!cfg.therapists.length) {
+    list.innerHTML = '<p class="hint">No therapists yet — add your first one below.</p>';
+  }
+  cfg.therapists.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 't-row';
+    const av = t.photo
+      ? '<img src="' + t.photo + '" alt="">'
+      : '<div class="t-initials">' + initialsOf(t.name) + '</div>';
+    const meta = t.method === 'ntfy' ? 'ntfy: ' + (t.ntfyTopic || '⚠️ no topic')
+               : t.method === 'telegram' ? 'Telegram: ' + (t.tgChat || '⚠️ no chat ID')
+               : 'SMS: ' + (t.phone || '⚠️ no number');
+    row.innerHTML =
+      '<div class="t-row-edit" data-act="edit-row">' + av +
+      '<div class="t-row-info"><div class="t-row-name"></div><div class="t-row-meta"></div></div></div>' +
+      '<div class="t-row-btns">' +
+      '<button class="btn secondary small" data-act="up">↑</button>' +
+      '<button class="btn secondary small" data-act="down">↓</button>' +
+      '<button class="btn secondary small" data-act="edit">Edit</button>' +
+      '<button class="btn danger small" data-act="del">Delete</button></div>';
+    row.querySelector('.t-row-name').textContent = t.name;
+    row.querySelector('.t-row-meta').textContent = meta;
+    row.querySelector('[data-act=up]').onclick = () => moveTherapist(i, -1);
+    row.querySelector('[data-act=down]').onclick = () => moveTherapist(i, 1);
+    row.querySelector('[data-act=edit]').onclick = () => openTherapistModal(t.id);
+    row.querySelector('[data-act=edit-row]').onclick = () => openTherapistModal(t.id);
+    row.querySelector('[data-act=del]').onclick = () => {
+      if (confirm('Delete ' + t.name + '?')) {
+        cfg.therapists = cfg.therapists.filter(x => x.id !== t.id);
+        save(); renderAdmin();
+      }
+    };
+    list.appendChild(row);
+  });
+
+  // log
+  const wrap = document.getElementById('logWrap');
+  if (!cfg.log.length) { wrap.innerHTML = '<p class="hint">No check-ins yet.</p>'; }
+  else {
+    let html = '<table class="log"><tr><th>When</th><th>Patient</th><th>Therapist</th><th>Sent</th></tr>';
+    cfg.log.forEach(l => {
+      const d = new Date(l.ts);
+      html += '<tr><td>' + d.toLocaleDateString([], {month:'short', day:'numeric'}) + ' ' +
+        d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) + '</td><td>' +
+        escapeHtml(l.patient) + '</td><td>' + escapeHtml(l.therapist) + '</td><td>' +
+        (l.ok ? '<span class="ok-dot">✓</span>' : '<span class="fail-dot">✗ failed</span>') +
+        '</td></tr>';
+    });
+    wrap.innerHTML = html + '</table>';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function moveTherapist(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= cfg.therapists.length) return;
+  const a = cfg.therapists;
+  [a[i], a[j]] = [a[j], a[i]];
+  save(); renderAdmin();
+}
+
+function saveGeneral() {
+  const office = document.getElementById('admOffice').value.trim();
+  if (office) cfg.officeName = office;
+  cfg.resetSecs = Math.min(60, Math.max(3, parseInt(document.getElementById('admReset').value) || 8));
+  cfg.msgStyle = document.getElementById('admMsgStyle').value;
+  cfg.tgToken = document.getElementById('admTgToken').value.trim();
+  cfg.tbKey = document.getElementById('admTbKey').value.trim();
+  save();
+  toast('Settings saved');
+}
+
+function exitAdmin() {
+  renderKiosk();
+  show('kioskScreen');
+}
+
+/* ---------------- therapist modal ---------------- */
+function openTherapistModal(id) {
+  editingId = id;
+  pendingPhoto = undefined;
+  const t = id ? cfg.therapists.find(x => x.id === id) : null;
+  document.getElementById('tModalTitle').textContent = t ? 'Edit therapist' : 'Add therapist';
+  document.getElementById('tName').value = t ? t.name : '';
+  document.getElementById('tMethod').value = t ? t.method : 'ntfy';
+  document.getElementById('tNtfyTopic').value = t && t.ntfyTopic ? t.ntfyTopic : '';
+  document.getElementById('tTgChat').value = t && t.tgChat ? t.tgChat : '';
+  document.getElementById('tPhone').value = t && t.phone ? t.phone : '';
+  document.getElementById('chatChips').innerHTML = '';
+  const prev = document.getElementById('tPhotoPreview');
+  if (t && t.photo) { prev.src = t.photo; prev.style.display = 'block';
+    document.getElementById('tPhotoClear').style.display = 'inline-block'; }
+  else { prev.style.display = 'none'; document.getElementById('tPhotoClear').style.display = 'none'; }
+  methodChanged();
+  updateNtfyLink();
+  openModal('tModal');
+}
+
+function methodChanged() {
+  const m = document.getElementById('tMethod').value;
+  document.querySelectorAll('.method-fields').forEach(el => el.classList.remove('active'));
+  document.getElementById('mf-' + m).classList.add('active');
+}
+
+function slug(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 20);
+}
+
+function genTopic() {
+  const name = document.getElementById('tName').value.trim() || 'therapist';
+  const rand = Array.from(crypto.getRandomValues(new Uint8Array(5)))
+    .map(b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
+  const office = slug(cfg.officeName) || 'office';
+  document.getElementById('tNtfyTopic').value = office + '-' + slug(name) + '-' + rand;
+  updateNtfyLink();
+}
+
+function updateNtfyLink() {
+  const topic = document.getElementById('tNtfyTopic').value.trim();
+  const a = document.getElementById('tNtfyLink');
+  if (topic) { a.textContent = NTFY_SERVER + '/' + topic; a.href = NTFY_SERVER + '/' + topic; }
+  else { a.textContent = ''; a.removeAttribute('href'); }
+}
+document.getElementById('tNtfyTopic').addEventListener('input', updateNtfyLink);
+
+async function detectChats() {
+  const token = cfg.tgToken || document.getElementById('admTgToken').value.trim();
+  if (!token) return toast('Enter your Telegram bot token in General settings first.');
+  try {
+    const r = await fetch('https://api.telegram.org/bot' + token + '/getUpdates');
+    const j = await r.json();
+    if (!j.ok) return toast('Telegram error: ' + (j.description || 'check the bot token'));
+    const chats = {};
+    (j.result || []).forEach(u => {
+      const c = u.message && u.message.chat;
+      if (c) chats[c.id] = ((c.first_name || '') + ' ' + (c.last_name || '')).trim() || c.title || c.username || String(c.id);
+    });
+    const box = document.getElementById('chatChips');
+    box.innerHTML = '';
+    const ids = Object.keys(chats);
+    if (!ids.length) return toast('No recent messages found. Have the therapist message the bot, then try again.');
+    ids.forEach(id => {
+      const chip = document.createElement('span');
+      chip.className = 'chat-chip';
+      chip.textContent = chats[id] + ' (' + id + ')';
+      chip.onclick = () => { document.getElementById('tTgChat').value = id; toast('Chat ID filled in'); };
+      box.appendChild(chip);
+    });
+  } catch (e) { toast('Could not reach Telegram: ' + e.message); }
+}
+
+function photoChosen(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    const size = 300;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const scale = Math.max(size / img.width, size / img.height);
+    const w = img.width * scale, h = img.height * scale;
+    ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+    URL.revokeObjectURL(url);
+    pendingPhoto = canvas.toDataURL('image/jpeg', 0.82);
+    const prev = document.getElementById('tPhotoPreview');
+    prev.src = pendingPhoto; prev.style.display = 'block';
+    document.getElementById('tPhotoClear').style.display = 'inline-block';
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast('Could not read that image.'); };
+  img.src = url;
+}
+
+function clearPhoto() {
+  pendingPhoto = null;
+  document.getElementById('tPhotoPreview').style.display = 'none';
+  document.getElementById('tPhotoClear').style.display = 'none';
+}
+
+function collectTherapistForm() {
+  const name = document.getElementById('tName').value.trim();
+  if (!name) { toast('Please enter a name.'); return null; }
+  const method = document.getElementById('tMethod').value;
+  const t = {
+    id: editingId || ('t' + Date.now()),
+    name: name,
+    method: method,
+    ntfyTopic: document.getElementById('tNtfyTopic').value.trim(),
+    tgChat: document.getElementById('tTgChat').value.trim(),
+    phone: document.getElementById('tPhone').value.trim(),
+    photo: null
+  };
+  if (method === 'ntfy' && !t.ntfyTopic) { toast('Generate or enter an ntfy topic.'); return null; }
+  if (method === 'telegram' && !t.tgChat) { toast('Enter a Telegram chat ID.'); return null; }
+  if (method === 'sms' && !t.phone) { toast('Enter a phone number.'); return null; }
+  const existing = editingId ? cfg.therapists.find(x => x.id === editingId) : null;
+  t.photo = pendingPhoto !== undefined ? pendingPhoto : (existing ? existing.photo : null);
+  return t;
+}
+
+function saveTherapist() {
+  const t = collectTherapistForm();
+  if (!t) return;
+  const idx = cfg.therapists.findIndex(x => x.id === t.id);
+  if (idx >= 0) cfg.therapists[idx] = t; else cfg.therapists.push(t);
+  try { save(); }
+  catch (e) {
+    toast('Storage is full — try a smaller photo.');
+    return;
+  }
+  closeModal('tModal');
+  renderAdmin();
+}
+
+async function testTherapist() {
+  const t = collectTherapistForm();
+  if (!t) return;
+  const btn = document.getElementById('tTestBtn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const ok = await sendNotification(t, 'Test from ' + (cfg.officeName || 'the check-in kiosk') +
+      ' — if you can read this, notifications are working! (' +
+      new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ')');
+    toast(ok ? 'Test sent! Check the phone.' : 'The service rejected the message — check the settings.');
+  } catch (e) {
+    toast('Test failed: ' + e.message);
+  }
+  btn.disabled = false; btn.textContent = 'Send test';
+}
+
+/* ---------------- backup ---------------- */
+function exportConfig() {
+  const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'checkin-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+function importConfig(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data.passHash || !Array.isArray(data.therapists)) throw new Error('not a valid backup');
+      if (!confirm('Replace ALL current settings with this backup?')) return;
+      cfg = Object.assign(defaultCfg(), data);
+      save();
+      renderAdmin();
+      toast('Backup restored');
+    } catch (e) { toast('Could not import: ' + e.message); }
+  };
+  reader.readAsText(file);
+}
+
+async function changePassword() {
+  const p = document.getElementById('admNewPass').value;
+  if (p.length < 4) return toast('Password must be at least 4 characters.');
+  cfg.passHash = await hash(p);
+  save();
+  document.getElementById('admNewPass').value = '';
+  toast('Password changed — write it down!');
+}
+
+function wipeAll() {
+  if (!confirm('This erases every therapist, photo, and setting on this iPad. Export a backup first if you might want it back. Continue?')) return;
+  if (!confirm('Really erase everything?')) return;
+  localStorage.removeItem(LS_KEY);
+  location.reload();
+}
+
+/* ---------------- boot ---------------- */
+cfg = load();
+if (!cfg || !cfg.passHash) {
+  show('setupScreen');
+} else {
+  cfg = Object.assign(defaultCfg(), cfg);
+  renderKiosk();
+  show('kioskScreen');
+}
+</script>
+</body>
+</html>
