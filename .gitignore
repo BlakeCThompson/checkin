@@ -1,0 +1,5 @@
+# Local secrets — never commit (recovery code, API keys)
+rec.code.txt
+*.code.txt
+checkin-backup-*.json
+.DS_Store
